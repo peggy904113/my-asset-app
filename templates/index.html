@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <title>AI 資產管家雲端版</title>
+</head>
+<body class="bg-light">
+    <div class="container py-4">
+        <h2 class="mb-4">🤖 AI 資產管家</h2>
+        
+        <div class="card text-white bg-dark mb-4 shadow">
+            <div class="card-body">
+                <h6 class="opacity-75">預估總資產 (含證券)</h6>
+                <h1 class="display-5 fw-bold">NT$ {{ "{:,}".format(total) }}</h1>
+                <p class="mb-0">現金存款：${{ "{:,}".format(cash) }}</p>
+            </div>
+        </div>
+
+        <<div class="col-md-6">
+    <div class="card p-3 shadow-sm">
+        <h6 class="fw-bold">🏦 銀行存款紀錄</h6>
+        <form action="/add_cash" method="POST" class="row g-2">
+            <div class="col-7">
+                <input type="text" name="bank_name" class="form-control" placeholder="銀行名稱 (如: 台銀)" required>
+            </div>
+            <div class="col-5">
+                <input type="number" name="amount" class="form-control" placeholder="金額" required>
+            </div>
+            <div class="col-12">
+                <button class="btn btn-success w-100">新增存款紀錄</button>
+            </div>
+        </form>
+    </div>
+</div>
+            <div class="col-md-6">
+                <div class="card p-3 shadow-sm">
+                    <h6 class="fw-bold">📈 買賣紀錄 (賣出請打負號)</h6>
+                    <form action="/add_stock" method="POST" class="row g-2">
+                        <div class="col-4"><input type="text" name="symbol" class="form-control" placeholder="2330.TW" required></div>
+                        <div class="col-4"><input type="number" name="shares" class="form-control" placeholder="股數" required></div>
+                        <div class="col-4"><input type="number" step="0.01" name="price" class="form-control" placeholder="價格" required></div>
+                        <div class="col-12"><button class="btn btn-primary w-100">送出紀錄</button></div>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <div class="card shadow-sm mb-4">
+            <div class="card-header bg-white fw-bold">現有持股狀態</div>
+            <div class="table-responsive">
+                <table class="table mb-0 align-middle">
+                    <thead class="table-light">
+                        <tr><th>標的</th><th>均價</th><th>剩餘股數</th><th>損益</th></tr>
+                    </thead>
+                    <tbody>
+                        {% for s in stocks %}
+                        <tr>
+                            <td><strong>{{ s.symbol }}</strong></td>
+                            <td>{{ s.cost }}</td>
+                            <td>{{ s.shares }}</td>
+                            <td class="{{ 'text-danger' if s.profit > 0 else 'text-success' }} fw-bold">{{ s.profit }}%</td>
+                        </tr>
+                        <tr>
+                            <td colspan="4" class="bg-light py-2"><small class="text-primary">🤖 AI 建議：{{ s.advice }}</small></td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="card shadow-sm">
+            <div class="card-header bg-secondary text-white fw-bold">歷史交易流水帳 (可修正/刪除)</div>
+            <div class="table-responsive" style="max-height: 300px;">
+                <table class="table table-sm mb-0">
+                    <thead>
+                        <tr><th>標的</th><th>股數</th><th>單價</th><th>操作</th></tr>
+                    </thead>
+                    <tbody>
+                        {% for h in history %}
+                        <tr>
+                            <td>{{ h.symbol }}</td>
+                            <td class="{{ 'text-primary' if h.shares > 0 else 'text-warning' }}">
+                                {{ '買進' if h.shares > 0 else '賣出' }} {{ h.shares|abs }}
+                            </td>
+                            <td>{{ h.price }}</td>
+                            <td>
+                                <a href="/delete_trade/{{ h.id }}" class="btn btn-sm btn-outline-danger py-0">刪除</a>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+    </div>
+</body>
+</html>
