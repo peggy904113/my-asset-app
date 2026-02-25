@@ -3,125 +3,105 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Gemini AI 資產助手</title>
+    <title>Gemini AI 智能財富</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        :root { --ai-blue: #007bff; --ai-glow: rgba(0, 123, 255, 0.2); }
-        body { background-color: #0b0e14; color: #e0e0e0; font-family: 'Segoe UI', sans-serif; }
-        .card { background: #161b22; border: 1px solid #30363d; border-radius: 15px; color: white; margin-bottom: 20px; }
-        .ai-chat-bubble { background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 100%); border-radius: 20px 20px 20px 0; padding: 20px; box-shadow: 0 0 20px var(--ai-glow); border: 1px solid #3b82f6; }
-        .stat-card { border-top: 4px solid var(--ai-blue); }
-        .form-control, .form-select { background: #0d1117; border: 1px solid #30363d; color: white; }
-        .form-control:focus { background: #0d1117; color: white; border-color: var(--ai-blue); box-shadow: 0 0 8px var(--ai-glow); }
-        .btn-ai { background: var(--ai-blue); color: white; border-radius: 10px; font-weight: bold; transition: 0.3s; }
-        .btn-ai:hover { background: #0056b3; transform: scale(1.02); }
-        .nav-tabs .nav-link { color: #8b949e; border: none; }
-        .nav-tabs .nav-link.active { background: transparent; color: var(--ai-blue); border-bottom: 2px solid var(--ai-blue); }
+        body { background-color: #0d1117; color: #c9d1d9; font-family: 'Segoe UI', system-ui, sans-serif; }
+        .card { background: #161b22; border: 1px solid #30363d; border-radius: 16px; margin-bottom: 24px; transition: 0.3s; }
+        .card:hover { border-color: #58a6ff; }
+        .ai-input-section { background: linear-gradient(135deg, #1e3a8a 0%, #0d1117 100%); padding: 40px 0; border-bottom: 1px solid #30363d; margin-bottom: 40px; }
+        .ai-input-wrapper { background: #0d1117; border: 2px solid #388bfd; border-radius: 50px; padding: 12px 25px; display: flex; align-items: center; box-shadow: 0 0 25px rgba(56, 139, 253, 0.2); }
+        .ai-input-wrapper input { background: transparent; border: none; color: white; flex-grow: 1; outline: none; font-size: 1.2rem; }
+        .btn-ai { background: #238636; color: white; border-radius: 30px; border: none; padding: 8px 25px; font-weight: bold; }
+        .stat-value { font-size: 2.5rem; font-weight: 800; }
+        .tag { font-size: 0.75rem; background: #21262d; color: #8b949e; padding: 4px 12px; border-radius: 20px; margin-right: 8px; border: 1px solid #30363d; }
     </style>
 </head>
 <body>
 
-<div class="container py-5">
-    <div class="row align-items-center mb-5">
-        <div class="col-md-7">
-            <div class="ai-chat-bubble">
-                <h5 class="fw-bold"><i class="bi bi-robot"></i> Gemini AI 財務分析師</h5>
-                <p id="ai-insight" class="mb-0">正在掃描您的資產庫存... 請確保已輸入您的銀行存款與股票代號。</p>
+<div class="ai-input-section text-center">
+    <div class="container">
+        <h2 class="text-white fw-bold mb-4">🤖 您好，我是 Gemini 財富助手</h2>
+        <div class="row justify-content-center">
+            <div class="col-lg-8">
+                <div class="ai-input-wrapper">
+                    <form action="/smart_input" method="POST" style="width: 100%; display: flex;">
+                        <input type="text" name="raw_text" placeholder="嘗試輸入：買 2330 1張 / 中信轉台新 3000 / 晚餐 -150" autocomplete="off" required>
+                        <button type="submit" class="btn btn-ai">分析並記錄</button>
+                    </form>
+                </div>
+                <div class="mt-3">
+                    <span class="tag">💡 股票：2330 1000股</span>
+                    <span class="tag">💡 轉帳：中信轉國泰 5000</span>
+                    <span class="tag">💡 收支：全聯 -500</span>
+                </div>
             </div>
-        </div>
-        <div class="col-md-5 text-end text-md-start mt-3 mt-md-0">
-            <h1 class="fw-bold mb-0">資產儀表板</h1>
-            <p class="text-muted">數據更新時間：{{ "{:,.0f}".format(total_cash + total_stock_value) }} TWD</p>
         </div>
     </div>
+</div>
 
+<div class="container">
     <div class="row">
-        <div class="col-md-3">
-            <div class="card p-4 stat-card">
-                <small class="text-muted">現金資產</small>
-                <h3 class="fw-bold">${{ "{:,.0f}".format(total_cash) }}</h3>
-                <canvas id="cashMiniChart" height="50"></canvas>
+        <div class="col-lg-4">
+            <div class="card p-4">
+                <h6 class="text-muted fw-bold">總資產估值 (TWD)</h6>
+                <div class="stat-value text-primary">${{ "{:,.0f}".format(total_cash + total_stock_value) }}</div>
+                <hr style="border-color: #30363d;">
+                <div class="d-flex justify-content-between mb-2">
+                    <span>現金總計</span><span class="text-white">${{ "{:,.0f}".format(total_cash) }}</span>
+                </div>
+                <div class="d-flex justify-content-between">
+                    <span>股票市值</span><span class="text-success">${{ "{:,.0f}".format(total_stock_value) }}</span>
+                </div>
             </div>
-            <div class="card p-4 stat-card" style="border-top-color: #28a745;">
-                <small class="text-muted">股票市值</small>
-                <h3 class="fw-bold text-success">${{ "{:,.0f}".format(total_stock_value) }}</h3>
-                <canvas id="stockMiniChart" height="50"></canvas>
+            
+            <div class="card p-4">
+                <h6 class="text-muted fw-bold mb-3">AI 建議區域</h6>
+                <p id="ai-msg" class="small text-muted">正在優化您的資產配置...</p>
             </div>
         </div>
-        <div class="col-md-6">
+
+        <div class="col-lg-5">
             <div class="card p-4 h-100">
-                <h6 class="fw-bold mb-3">資產成長曲線 (模擬趨勢)</h6>
-                <canvas id="mainChart"></canvas>
+                <h6 class="text-muted fw-bold mb-4">資產分配比例 (Portfolio)</h6>
+                <div style="height: 250px;"><canvas id="donutChart"></canvas></div>
             </div>
         </div>
-        <div class="col-md-3">
-            <div class="card p-4 h-100">
-                <h6 class="fw-bold mb-3">分配比例</h6>
-                <canvas id="donutChart"></canvas>
+
+        <div class="col-lg-3">
+            <div class="card p-4 h-100 text-center">
+                <h6 class="text-muted fw-bold mb-4">成長趨勢 (Simulation)</h6>
+                <canvas id="lineChart"></canvas>
+                <div class="mt-4 small text-muted">資產水位健康度：<br><strong class="text-info">優良</strong></div>
             </div>
         </div>
     </div>
 
     <div class="row mt-4">
-        <div class="col-lg-4">
-            <div class="card p-4">
-                <ul class="nav nav-tabs mb-3" id="actionTab">
-                    <li class="nav-item"><a class="nav-link active" data-bs-toggle="tab" href="#normal-mode">一般紀錄</a></li>
-                    <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#transfer-mode">銀行轉帳</a></li>
-                </ul>
-                <div class="tab-content">
-                    <div class="tab-pane fade show active" id="normal-mode">
-                        <form action="/action" method="POST">
-                            <input type="hidden" name="mode" value="normal">
-                            <input type="hidden" name="id" id="edit-id">
-                            <input type="text" name="bank_name" id="edit-name" class="form-control mb-2" placeholder="銀行名稱/項目">
-                            <input type="number" step="any" name="amount" id="edit-amount" class="form-control mb-3" placeholder="金額 (支出請用負數)">
-                            <button class="btn btn-ai w-100">儲存變動</button>
-                        </form>
-                    </div>
-                    <div class="tab-pane fade" id="transfer-mode">
-                        <form action="/action" method="POST">
-                            <input type="hidden" name="mode" value="transfer">
-                            <input type="text" name="from_bank" class="form-control mb-2" placeholder="從哪家銀行轉出">
-                            <input type="text" name="to_bank" class="form-control mb-2" placeholder="轉入哪家銀行">
-                            <input type="number" step="any" name="amount" class="form-control mb-3" placeholder="轉帳金額">
-                            <button class="btn btn-ai w-100">執行轉帳</button>
-                        </form>
-                    </div>
-                </div>
-                <hr>
-                <h6 class="fw-bold text-success mb-2">＋ 記錄股票持倉</h6>
-                <form action="/add_trade" method="POST">
-                    <input type="text" name="symbol" class="form-control mb-2" placeholder="代號 (如 2330.TW)">
-                    <input type="number" step="any" name="shares" class="form-control mb-3" placeholder="股數">
-                    <button class="btn btn-success w-100 fw-bold" style="border-radius:10px;">更新股票</button>
-                </form>
-            </div>
-        </div>
-
-        <div class="col-lg-8">
-            <div class="card p-4">
-                <h6 class="fw-bold mb-3">資產明細一覽表</h6>
+        <div class="col-12">
+            <div class="card p-4 shadow-sm">
+                <h6 class="fw-bold mb-4 text-white">智慧分類明細表</h6>
                 <div class="table-responsive">
                     <table class="table table-dark table-hover align-middle">
-                        <thead><tr><th>名稱/代號</th><th>類型</th><th>現值</th><th>操作</th></tr></thead>
+                        <thead class="text-muted">
+                            <tr><th>項目 / 代號</th><th>類型</th><th>金額 / 市值</th><th>操作</th></tr>
+                        </thead>
                         <tbody>
                             {% for c in cash_items %}
                             <tr>
-                                <td>{{ c[1] }}</td>
-                                <td><span class="badge bg-secondary">現金</span></td>
-                                <td class="{{ 'text-danger fw-bold' if c[2] < 0 else '' }}">${{ "{:,.2f}".format(c[2]) }}</td>
-                                <td>
-                                    <button class="btn btn-sm btn-outline-info" onclick="editItem('{{ c[0] }}','{{ c[1] }}','{{ c[2] }}')">編輯</button>
-                                    <a href="/delete_cash/{{ c[0] }}" class="text-danger ms-2">刪除</a>
+                                <td class="fw-bold text-white">{{ c[1] }}</td>
+                                <td><span class="badge bg-primary opacity-75">現金</span></td>
+                                <td class="{{ 'text-danger' if c[2] < 0 else 'text-info' }} fw-bold">
+                                    ${{ "{:,.2f}".format(c[2]) }}
                                 </td>
+                                <td><a href="/delete_cash/{{ c[0] }}" class="text-danger text-decoration-none">移除</a></td>
                             </tr>
                             {% endfor %}
                             {% for s in stocks %}
                             <tr>
-                                <td>{{ s.symbol }}</td>
-                                <td><span class="badge bg-success">股票</span></td>
+                                <td class="fw-bold text-white">{{ s.symbol }}</td>
+                                <td><span class="badge bg-success opacity-75">證券</span></td>
                                 <td class="text-success fw-bold">${{ "{:,.2f}".format(s.value) }}</td>
                                 <td><small class="text-muted">現價: {{ s.price }}</small></td>
                             </tr>
@@ -134,44 +114,53 @@
     </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
 <script>
     const tc = {{ total_cash }};
     const ts = {{ total_stock_value }};
     const total = tc + ts;
 
-    // 1. Donut Chart
+    // 1. 分配圓餅圖
     new Chart(document.getElementById('donutChart'), {
         type: 'doughnut',
-        data: { labels: ['現金', '股票'], datasets: [{ data: [tc, ts], backgroundColor: ['#3b82f6', '#10b981'], borderWidth: 0 }] },
-        options: { plugins: { legend: { display: false } }, cutout: '70%' }
+        data: {
+            labels: ['現金資產', '證券市場'],
+            datasets: [{
+                data: [tc, ts],
+                backgroundColor: ['#388bfd', '#238636'],
+                hoverOffset: 15,
+                borderWidth: 0
+            }]
+        },
+        options: { 
+            maintainAspectRatio: false, 
+            plugins: { legend: { position: 'bottom', labels: { color: '#8b949e' } } },
+            cutout: '75%'
+        }
     });
 
-    // 2. Main Growth Chart (Mock)
-    new Chart(document.getElementById('mainChart'), {
+    // 2. 模擬成長圖
+    new Chart(document.getElementById('lineChart'), {
         type: 'line',
         data: {
-            labels: ['Week 1', 'Week 2', 'Week 3', 'Today'],
-            datasets: [{ label: '總價值', data: [total*0.8, total*0.85, total*0.92, total], borderColor: '#3b82f6', tension: 0.4, fill: true, backgroundColor: 'rgba(59, 130, 246, 0.1)' }]
+            labels: ['1', '2', '3', 'Now'],
+            datasets: [{ 
+                data: [total*0.7, total*0.85, total*0.9, total], 
+                borderColor: '#58a6ff', 
+                backgroundColor: 'rgba(88, 166, 255, 0.1)',
+                fill: true,
+                tension: 0.4 
+            }]
         },
-        options: { plugins: { legend: { display: false } }, scales: { y: { display: false }, x: { grid: { display: false } } } }
+        options: { plugins: { legend: { display: false } }, scales: { y: { display: false }, x: { display: false } } }
     });
 
-    // 3. AI Insight
-    const insight = document.getElementById('ai-insight');
+    // 3. AI 建議邏輯
+    const msg = document.getElementById('ai-msg');
     if (total > 0) {
-        let ratio = (ts / total) * 100;
-        if (ratio > 60) insight.innerText = `分析完畢！您的股票配置佔 ${ratio.toFixed(1)}%，屬於積極型。建議保留至少 6 個月的生活預備金。`;
-        else if (ratio < 10) insight.innerText = "目前資產多為現金。在低利時代，建議撥出 20% 資金配置在全球化 ETF 以對抗通膨。";
-        else insight.innerText = "您的資產結構非常健康！建議繼續保持定期定額投入，目前風險等級：中性穩定。";
-    }
-
-    function editItem(id, name, amount) {
-        document.getElementById('edit-id').value = id;
-        document.getElementById('edit-name').value = name;
-        document.getElementById('edit-amount').value = amount;
-        const trigger = document.querySelector('#actionTab a[href="#normal-mode"]');
-        bootstrap.Tab.getInstance(trigger).show();
+        let r = (ts / total) * 100;
+        if (r > 70) msg.innerText = "🚨 偵測到風險：您的證券佔比高達 " + r.toFixed(0) + "%。在市場高位時，建議分批轉入現金帳戶避險。";
+        else if (r < 20) msg.innerText = "📈 偵測到機會：目前現金過多，建議在回檔時佈局台股 0050 等大型標的。";
+        else msg.innerText = "✅ 狀態平衡：目前的資產分配非常穩定，適合作為長期財富成長基礎。";
     }
 </script>
 </body>
