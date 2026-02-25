@@ -21,58 +21,68 @@ init_db()
 
 @app.route('/')
 def index():
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
-    cursor.execute('SELECT id, name, amount, currency FROM cash ORDER BY id DESC')
-    cash_items = cursor.fetchall()
-    cursor.execute('SELECT SUM(amount) FROM cash')
-    res_cash = cursor.fetchone()
-    total_cash = float(res_cash[0]) if res_cash and res_cash[0] is not None else 0.0
-    
-    cursor.execute('SELECT symbol, SUM(shares) FROM trades GROUP BY symbol')
-    stocks_raw = cursor.fetchall()
-    stock_list = []
-    total_stock_value = 0.0
-    for symbol, shares in stocks_raw:
-        if shares > 0:
-            try:
-                ticker = yf.Ticker(symbol)
-                price = float(ticker.fast_info.get('last_price', 0))
-                val = shares * price
-                total_stock_value += val
-                stock_list.append({'symbol': symbol, 'shares': shares, 'price': round(price, 2), 'value': round(val, 2)})
-            except:
-                stock_list.append({'symbol': symbol, 'shares': shares, 'price': 0, 'value': 0})
-    conn.close()
-    return render_template('index.html', total_cash=total_cash, total_stock_value=total_stock_value, cash_items=cash_items, stocks=stock_list)
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        cursor.execute('SELECT id, name, amount, currency FROM cash ORDER BY id DESC')
+        cash_items = cursor.fetchall()
+        
+        cursor.execute('SELECT SUM(amount) FROM cash')
+        res_cash = cursor.fetchone()
+        total_cash = float(res_cash[0]) if res_cash and res_cash[0] is not None else 0.0
+        
+        cursor.execute('SELECT symbol, SUM(shares) FROM trades GROUP BY symbol')
+        stocks_raw = cursor.fetchall()
+        stock_list = []
+        total_stock_value = 0.0
+        for symbol, shares in stocks_raw:
+            if shares > 0:
+                try:
+                    ticker = yf.Ticker(symbol)
+                    price = float(ticker.fast_info.get('last_price', 0))
+                    val = shares * price
+                    total_stock_value += val
+                    stock_list.append({'symbol': symbol, 'shares': shares, 'price': round(price, 2), 'value': round(val, 2)})
+                except:
+                    stock_list.append({'symbol': symbol, 'shares': shares, 'price': 0, 'value': 0})
+        conn.close()
+        
+        # 在 Python 端就先格式化好數字字串，避免 HTML 當機
+        return render_template('index.html', 
+                               total_cash=total_cash,
+                               display_cash=f"{total_cash:,.2f}", 
+                               total_stock_value=total_stock_value,
+                               display_stock=f"{total_stock_value:,.2f}",
+                               cash_items=cash_items, 
+                               stocks=stock_list)
+    except Exception as e:
+        return f"系統啟動中... 請稍後重新整理 ({str(e)})"
 
-# 新增/編輯現金
 @app.route('/save_cash', methods=['POST'])
 def save_cash():
     item_id = request.form.get('id')
     name = request.form.get('bank_name')
     amt = request.form.get('amount')
-    conn = sqlite3.connect(db_path)
-    if item_id: # 如果有 ID 代表是編輯
-        conn.execute('UPDATE cash SET name=?, amount=? WHERE id=?', (name, float(amt), item_id))
-    else: # 否則就是新增
-        conn.execute('INSERT INTO cash (name, amount) VALUES (?, ?)', (name, float(amt)))
-    conn.commit()
-    conn.close()
+    if name and amt:
+        conn = sqlite3.connect(db_path)
+        if item_id:
+            conn.execute('UPDATE cash SET name=?, amount=? WHERE id=?', (name, float(amt), item_id))
+        else:
+            conn.execute('INSERT INTO cash (name, amount) VALUES (?, ?)', (name, float(amt)))
+        conn.commit()
+        conn.close()
     return redirect(url_for('index'))
 
-# 轉帳功能
 @app.route('/transfer', methods=['POST'])
 def transfer():
     from_bank = request.form.get('from_bank')
     to_bank = request.form.get('to_bank')
-    amt = float(request.form.get('amount', 0))
-    if from_bank and to_bank and amt > 0:
+    amt = request.form.get('amount')
+    if from_bank and to_bank and amt:
+        val = float(amt)
         conn = sqlite3.connect(db_path)
-        # 轉出紀錄 (負數)
-        conn.execute('INSERT INTO cash (name, amount) VALUES (?, ?)', (f"轉帳至 {to_bank}", -amt))
-        # 轉入紀錄 (正數)
-        conn.execute('INSERT INTO cash (name, amount) VALUES (?, ?)', (f"來自 {from_bank} 轉帳", amt))
+        conn.execute('INSERT INTO cash (name, amount) VALUES (?, ?)', (f"轉出: {from_bank} -> {to_bank}", -val))
+        conn.execute('INSERT INTO cash (name, amount) VALUES (?, ?)', (f"轉入: {from_bank} -> {to_bank}", val))
         conn.commit()
         conn.close()
     return redirect(url_for('index'))
