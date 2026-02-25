@@ -2,43 +2,43 @@ import os
 import sqlite3
 import re
 from flask import Flask, render_template_string, request, redirect, url_for
+from datetime import datetime
 
 app = Flask(__name__)
-# 升級到 v36 支援成本欄位
-db_path = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'assets_v36.db')
-
-def smart_extract_amt(text):
-    text = text.replace(',', '').strip()
-    # 處理「張」：1張 = 1000股
-    zhang_match = re.search(r'(\d+\.?\d*)\s*張', text)
-    if zhang_match:
-        return float(zhang_match.group(1)) * 1000
-    # 處理「萬」
-    wan_match = re.search(r'(\d+\.?\d*)\s*萬', text)
-    if wan_match:
-        return float(wan_match.group(1)) * 10000
-    # 處理純數字
-    nums = re.findall(r'\d+\.?\d*', text)
-    return float(nums[0]) if nums else 0
-
-def extract_cost(text):
-    # 尋找「成本」後面的數字
-    match = re.search(r'成本\s*(\d+\.?\d*)', text)
-    return float(match.group(1)) if match else 0
+# 升級到 v40 支援完整分頁與折線圖趨勢
+db_path = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'assets_v40.db')
 
 def init_db():
     conn = sqlite3.connect(db_path)
     conn.execute('''CREATE TABLE IF NOT EXISTS assets 
                    (id INTEGER PRIMARY KEY AUTOINCREMENT, 
-                    name TEXT, amount REAL, currency TEXT, type TEXT, cost REAL)''')
+                    bank_name TEXT, amount REAL, category TEXT, type TEXT, cost REAL, date TEXT)''')
     conn.commit()
     conn.close()
+
+def smart_extract(text):
+    # 提取數字
+    nums = re.findall(r'\d+\.?\d*', text.replace(',', ''))
+    amt = float(nums[0]) if nums else 0
+    # 單位轉換：張 -> 1000, 萬 -> 10000
+    if '張' in text: amt *= 1000
+    elif '萬' in text: amt *= 10000
+    
+    # 提取成本
+    cost_match = re.search(r'成本\s*(\d+\.?\d*)', text)
+    cost = float(cost_match.group(1)) if cost_match else 0
+    
+    # 提取銀行名稱 (簡單取第一個中文字群)
+    bank_match = re.search(r'([\u4e00-\u9fa5]+)', text)
+    bank = bank_match.group(1) if bank_match else "未命名"
+    
+    return bank, amt, cost
 
 init_db()
 
 HTML_TEMPLATE = """
 <!DOCTYPE html>
-<html>
+<html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -46,73 +46,96 @@ HTML_TEMPLATE = """
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        body { background-color: #0d1117; color: #c9d1d9; }
-        .main-card { background: #161b22; border: 1px solid #30363d; border-radius: 12px; padding: 20px; margin-bottom: 15px; }
+        body { background-color: #0d1117; color: #c9d1d9; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+        .nav-tabs { border-bottom: 1px solid #30363d; margin-bottom: 20px; }
+        .nav-link { color: #8b949e; border: none !important; }
+        .nav-link.active { color: #58a6ff !important; background: transparent !important; border-bottom: 2px solid #58a6ff !important; }
+        .card { background: #161b22; border: 1px solid #30363d; border-radius: 12px; padding: 20px; margin-bottom: 15px; }
         .ai-input { background: #0d1117; border: 2px solid #388bfd; border-radius: 30px; color: white; padding: 12px 20px; width: 100%; outline: none; }
-        .ai-tip { font-size: 0.75rem; color: #f1e05a; background: rgba(241, 224, 90, 0.1); padding: 4px 8px; border-radius: 4px; display: inline-block; margin-top: 5px; }
-        .stock-tag { font-size: 0.7rem; background: #238636; color: white; padding: 2px 6px; border-radius: 4px; }
+        .ai-tip { font-size: 0.75rem; color: #f1e05a; background: rgba(241, 224, 90, 0.1); padding: 6px 10px; border-radius: 6px; display: block; margin-top: 5px; }
     </style>
 </head>
 <body>
     <div class="container py-4">
-        <h5 class="text-center fw-bold mb-4">🤖 AI 證券駐守助理</h5>
+        <h4 class="text-center fw-bold mb-4">🤖 AI 智慧理財大腦</h4>
         
         <form action="/process" method="POST" class="mb-4">
-            <input type="text" name="user_input" class="ai-input" placeholder="例如: 買 2330 1張 成本 600">
-            <small class="text-muted ps-2">支援格式：10萬、1張、成本 100</small>
+            <input type="text" name="user_input" class="ai-input" placeholder="例如: 中信 10萬 (存款)、台積電 1張 成本 600 (證券)">
         </form>
 
-        <div class="row">
-            <div class="col-6"><div class="main-card text-center">
-                <small class="text-muted">資產總計</small>
-                <h3 class="fw-bold text-white">${{ "{:,.0f}".format(total_val) }}</h3>
-            </div></div>
-            <div class="col-6"><div class="main-card" style="height: 105px; padding: 5px;"><canvas id="assetChart"></canvas></div></div>
-        </div>
+        <ul class="nav nav-tabs justify-content-center" id="myTab">
+            <li class="nav-item"><a class="nav-link active" data-bs-toggle="tab" href="#summary">資產總覽</a></li>
+            <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#deposit">銀行存款</a></li>
+            <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#stock">證券投資</a></li>
+        </ul>
 
-        <div class="main-card">
-            <h6 class="fw-bold mb-3">我的持倉與 AI 診斷</h6>
-            {% for item in history %}
-            <div class="border-bottom border-secondary py-3">
-                <div class="d-flex justify-content-between">
-                    <div>
-                        <span class="fw-bold text-white">{{ item[1] }}</span>
-                        {% if item[4] == '證券' %}<span class="stock-tag">證券</span>{% endif %}
+        <div class="tab-content">
+            <div class="tab-pane fade show active" id="summary">
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="card text-center">
+                            <small class="text-muted">預估總資產 (折合 TWD)</small>
+                            <h2 class="fw-bold text-white">${{ "{:,.0f}".format(total_val) }}</h2>
+                        </div>
                     </div>
-                    <div class="text-end">
-                        <div class="fw-bold">${{ "{:,.0f}".format(item[2]) if item[4] != '證券' else "{:,.0f} 股".format(item[2]) }}</div>
-                        <a href="/delete/{{ item[0] }}" class="text-danger small" style="text-decoration:none;">移除</a>
+                    <div class="col-md-6">
+                        <div class="card" style="height: 120px; padding: 10px;"><canvas id="trendChart"></canvas></div>
                     </div>
                 </div>
-                {% if item[4] == '證券' %}
-                    <div class="ai-tip">
-                        {% if item[5] > 0 %}
-                            🤖 AI 駐守：成本 {{ item[5] }}。建議設 10% 停損點於 {{ item[5] * 0.9 }}，若大盤轉弱請注意風險。
-                        {% else %}
-                            🤖 AI 建議：未記錄成本。建議輸入「成本 XXX」以利 AI 追蹤風險。
-                        {% endif %}
-                    </div>
-                {% endif %}
+                <div class="card"><canvas id="pieChart" style="max-height: 200px;"></canvas></div>
             </div>
-            {% endfor %}
+
+            <div class="tab-pane fade" id="deposit">
+                <div class="card">
+                    <h6 class="fw-bold mb-3">各銀行存款明細</h6>
+                    {% for item in history if item[4] == '存款' %}
+                    <div class="d-flex justify-content-between border-bottom border-secondary py-3">
+                        <div><span class="text-white">{{ item[1] }}</span> <span class="badge bg-dark text-info">存款</span></div>
+                        <div class="text-end text-white fw-bold">${{ "{:,.0f}".format(item[2]) }}<br><a href="/delete/{{ item[0] }}" class="text-danger small" style="text-decoration:none;">移除</a></div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+
+            <div class="tab-pane fade" id="stock">
+                <div class="card">
+                    <h6 class="fw-bold mb-3">證券持倉診斷</h6>
+                    {% for item in history if item[4] == '證券' %}
+                    <div class="border-bottom border-secondary py-3">
+                        <div class="d-flex justify-content-between">
+                            <span class="text-white fw-bold">{{ item[1] }}</span>
+                            <span class="text-info">{{ "{:,.0f}".format(item[2]) }} 股</span>
+                        </div>
+                        <div class="ai-tip">
+                            {% if item[5] > 0 %}
+                            🤖 AI 駐守：成本 {{ item[5] }}。建議停損位：{{ item[5] * 0.9 }}。目前觀察大盤支撐力道。
+                            {% else %}
+                            🤖 AI 建議：請輸入成本以利計算風險。
+                            {% endif %}
+                        </div>
+                        <div class="text-end"><a href="/delete/{{ item[0] }}" class="text-danger small" style="text-decoration:none;">移除</a></div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
         </div>
     </div>
 
     <script>
-        const ctx = document.getElementById('assetChart').getContext('2d');
-        new Chart(ctx, {
-            type: 'pie',
-            data: {
-                labels: ['一般', '證券'],
-                datasets: [{
-                    data: [{{ type_sums['一般'] }}, {{ type_sums['證券'] }}],
-                    backgroundColor: ['#58a6ff', '#238636'],
-                    borderWidth: 0
-                }]
-            },
-            options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
+        // 折線圖
+        new Chart(document.getElementById('trendChart'), {
+            type: 'line',
+            data: { labels: {{ dates | safe }}, datasets: [{ data: {{ values | safe }}, borderColor: '#58a6ff', tension: 0.3, fill: true, backgroundColor: 'rgba(88, 166, 255, 0.1)' }] },
+            options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { display: false }, y: { display: false } } }
+        });
+        // 圓餅圖
+        new Chart(document.getElementById('pieChart'), {
+            type: 'doughnut',
+            data: { labels: ['存款', '證券'], datasets: [{ data: [{{ deposit_val }}, {{ stock_val }}], backgroundColor: ['#388bfd', '#238636'], borderWidth: 0 }] },
+            options: { plugins: { legend: { position: 'bottom', labels: { color: '#c9d1d9' } } } }
         });
     </script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
 """
@@ -121,32 +144,36 @@ HTML_TEMPLATE = """
 def index():
     conn = sqlite3.connect(db_path)
     c = conn.cursor()
-    c.execute('SELECT id, name, amount, currency, type, cost FROM assets ORDER BY id DESC')
+    c.execute('SELECT * FROM assets ORDER BY date ASC')
     history = c.fetchall()
     
-    total_val = 0
-    type_sums = {'一般': 0, '證券': 0}
+    total_val, deposit_val, stock_val = 0, 0, 0
+    dates, values = [], []
+    
     for item in history:
-        # 簡單邏輯：如果是證券，總額先以股數計算（未來可再加入即時股價）
         val = item[2]
         total_val += val
-        type_sums[item[4]] += val
+        if item[4] == '存款': deposit_val += val
+        else: stock_val += val
+        
+        dates.append(item[6][5:10]) # 取 MM-DD
+        values.append(total_val)
         
     conn.close()
-    return render_template_string(HTML_TEMPLATE, history=history, total_val=total_val, type_sums=type_sums)
+    return render_template_string(HTML_TEMPLATE, history=history[::-1], total_val=total_val, deposit_val=deposit_val, stock_val=stock_val, dates=dates, values=values)
 
 @app.route('/process', methods=['POST'])
 def process():
     text = request.form.get('user_input', '').strip()
-    amt = smart_extract_amt(text)
-    cost = extract_cost(text)
+    bank, amt, cost = smart_extract(text)
     
-    asset_type = "證券" if any(w in text for w in ["股", "張", "買", "成本"]) else "一般"
+    # AI 劃分類別：有「股、張、成本、或純數字代號」歸類證券，其餘歸存款
+    asset_type = "證券" if any(w in text for w in ["股", "張", "成本"]) or (bank.isdigit() and len(bank)>=4) else "存款"
     
     if amt != 0:
         conn = sqlite3.connect(db_path)
-        conn.execute('INSERT INTO assets (name, amount, currency, type, cost) VALUES (?, ?, ?, ?, ?)', 
-                     (text, amt, "TWD", asset_type, cost))
+        conn.execute('INSERT INTO assets (bank_name, amount, category, type, cost, date) VALUES (?, ?, ?, ?, ?, ?)', 
+                     (bank, amt, "自動歸類", asset_type, cost, datetime.now().strftime("%Y-%m-%d %H:%M")))
         conn.commit()
         conn.close()
     return redirect(url_for('index'))
