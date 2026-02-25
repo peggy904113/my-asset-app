@@ -5,10 +5,9 @@ from flask import Flask, render_template_string, request, redirect, url_for
 import yfinance as yf
 
 app = Flask(__name__)
-# 使用 v16 版本資料庫
-db_path = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'assets_v16.db')
+db_path = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'assets_v17.db')
 
-# --- 1. AI 數字解析邏輯 (支援國字與阿拉伯數字) ---
+# --- 1. AI 數字解析邏輯 ---
 def cn_to_num(cn):
     if not cn: return 0
     digits = {'零':0,'一':1,'二':2,'兩':2,'三':3,'四':4,'五':5,'六':6,'七':7,'八':8,'九':9}
@@ -34,7 +33,207 @@ def smart_extract_amt(text):
 # --- 2. 資料庫初始化 ---
 def init_db():
     conn = sqlite3.connect(db_path)
-    # 統一儲存表
+    conn.execute('''CREATE TABLE IF NOT EXISTS assets 
+                   (id INTEGER PRIMARY KEY AUTOINCREMENT, 
+                    name TEXT, amount REAL, category TEXT, symbol TEXT, date DATETIME DEFAULT CURRENT_TIMESTAMP)''')
+    conn.execute('CREATE TABLE IF NOT EXISTS goals (id INTEGER PRIMARY KEY, target_amount REAL)')
+    conn.execute('INSERT OR IGNORE INTO goals (id, target_amount) VALUES (1, 1000000)')
+    conn.commit()
+    conn.close()
+
+init_db()
+
+# --- 3. 豪華圖表版 HTML ---
+HTML_TEMPLATE = """
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Gemini AI 財富儀表板</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root { --bg: #0d1117; --card: #161b22; --border: #30363d; }
+        body { background-color: var(--bg); color: #c9d1d9; font-family: sans-serif; padding-bottom: 50px; }
+        .ai-header { background: linear-gradient(135deg, #1e3a8a 0%, #0d1117 100%); padding: 30px 15px; border-bottom: 1px solid var(--border); }
+        .ai-input-wrapper { background: #0d1117; border: 2px solid #388bfd; border-radius: 30px; padding: 8px 15px; display: flex; align-items: center; }
+        .ai-input-wrapper input { background: transparent; border: none; color: white; flex-grow: 1; outline: none; }
+        .card { background: var(--card); border: 1px solid var(--border); border-radius: 15px; margin-top: 15px; }
+        .progress { height: 12px; background-color: #30363d; border-radius: 6px; }
+        .btn-ai { background: #238636; color: white; border-radius: 20px; border: none; padding: 5px 15px; font-weight: bold; }
+        .history-item { border-bottom: 1px solid var(--border); padding: 12px 0; display: flex; justify-content: space-between; align-items: center; }
+    </style>
+</head>
+<body>
+    <div class="ai-header text-center">
+        <h5 class="fw-bold text-white mb-3">🤖 GEMINI AI 財富大腦</h5>
+        <div class="container">
+            <form action="/process" method="POST" class="ai-input-wrapper">
+                <input type="text" name="user_input" placeholder="例如：中信五萬、買 2330 1張..." required>
+                <button type="submit" class="btn-ai">發送</button>
+            </form>
+        </div>
+    </div>
+
+    <div class="container mt-3">
+        <div class="card p-3 text-center">
+            <p class="text-muted mb-1 small">總資產價值</p>
+            <h2 class="text-white fw-bold">${{ "{:,.0f}".format(total_val) }}</h2>
+            <div class="progress mt-2">
+                <div class="progress-bar bg-info" style="width: {{ progress }}%"></div>
+            </div>
+            <div class="d-flex justify-content-between mt-1 small text-muted">
+                <span>達成率 {{ progress }}%</span>
+                <span>目標：${{ "{:,.0f}".format(goal_amt) }}</span>
+            </div>
+        </div>
+
+        <div class="row">
+            <div class="col-md-6">
+                <div class="card p-3">
+                    <h6 class="fw-bold mb-3">📊 資產分佈</h6>
+                    <div style="height: 200px;"><canvas id="pieChart"></canvas></div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card p-3">
+                    <h6 class="fw-bold mb-3">📈 增長趨勢</h6>
+                    <div style="height: 200px;"><canvas id="lineChart"></canvas></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card p-3 mt-3">
+            <h6 class="fw-bold mb-3">📝 異動紀錄</h6>
+            {% for item in assets %}
+            <div class="history-item">
+                <div>
+                    <div class="text-white">{{ item.name }}</div>
+                    <small class="text-muted">{{ item.category }}</small>
+                </div>
+                <div class="text-end">
+                    <div class="fw-bold {{ 'text-success' if item.display_amount >= 0 else 'text-danger' }}">
+                        ${{ "{:,.0f}".format(item.display_amount) }}
+                    </div>
+                    <a href="/delete/{{ item.id }}" class="text-danger small">移除</a>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <script>
+        const commonOptions = { responsive: true, maintainAspectRatio: false, plugins: { legend: { labels: { color: '#c9d1d9' } } } };
+        
+        // 圓餅圖
+        new Chart(document.getElementById('pieChart'), {
+            type: 'doughnut',
+            data: {
+                labels: {{ cat_labels | safe }},
+                datasets: [{
+                    data: {{ cat_values | safe }},
+                    backgroundColor: ['#58a6ff', '#238636', '#f1e05a', '#f85149'],
+                    borderWidth: 0
+                }]
+            },
+            options: commonOptions
+        });
+
+        // 折線圖
+        new Chart(document.getElementById('lineChart'), {
+            type: 'line',
+            data: {
+                labels: {{ trend_labels | safe }},
+                datasets: [{
+                    label: '資產走勢',
+                    data: {{ trend_values | safe }},
+                    borderColor: '#58a6ff',
+                    tension: 0.3,
+                    fill: true,
+                    backgroundColor: 'rgba(88, 166, 255, 0.1)'
+                }]
+            },
+            options: { ...commonOptions, scales: { y: { ticks: { color: '#8b949e' } }, x: { ticks: { color: '#8b949e' } } } }
+        });
+    </script>
+</body>
+</html>
+"""
+
+# --- 4. 路由與數據處理 ---
+@app.route('/')
+def index():
+    conn = sqlite3.connect(db_path)
+    c = conn.cursor()
+    c.execute('SELECT target_amount FROM goals WHERE id=1')
+    goal_amt = c.fetchone()[0]
+    c.execute('SELECT id, name, amount, category, symbol, date FROM assets ORDER BY date ASC')
+    raw_data = c.fetchall()
+    
+    processed_assets = []
+    total_val = 0
+    cat_map = {}
+    trend_values = [0]
+    trend_labels = ["Start"]
+
+    for item in raw_data:
+        aid, name, amt, cat, sym, date = item
+        display_amt = amt
+        if cat == '股票' and sym:
+            try:
+                price = yf.Ticker(sym).fast_info.get('last_price', 0)
+                display_amt = amt * price
+            except: display_amt = 0
+        
+        total_val += display_amt
+        cat_map[cat] = cat_map.get(cat, 0) + display_amt
+        trend_values.append(total_val)
+        trend_labels.append(date[5:10]) # 取 MM-DD
+        
+        processed_assets.append({'id': aid, 'name': name, 'display_amount': display_amt, 'category': cat})
+
+    progress = min(100, round((total_val / goal_amt) * 100, 1)) if goal_amt > 0 else 0
+    conn.close()
+
+    return render_template_string(HTML_TEMPLATE, assets=processed_assets[::-1], total_val=total_val, 
+                                  goal_amt=goal_amt, progress=progress,
+                                  cat_labels=list(cat_map.keys()), cat_values=list(cat_map.values()),
+                                  trend_labels=trend_labels, trend_values=trend_values)
+
+@app.route('/process', methods=['POST'])
+def process():
+    text = request.form.get('user_input', '').strip()
+    amt = smart_extract_amt(text)
+    conn = sqlite3.connect(db_path)
+    
+    if "目標" in text:
+        conn.execute('UPDATE goals SET target_amount = ? WHERE id = 1', (amt,))
+    elif any(w in text for w in ["股", "張"]) or re.search(r'\d{4}', text):
+        sym_match = re.search(r'([A-Z0-9\.]+)', text.upper())
+        sym = sym_match.group() if sym_match else ""
+        if sym.isdigit() and len(sym) >= 4: sym += ".TW"
+        shares = amt * 1000 if "張" in text else amt
+        conn.execute('INSERT INTO assets (name, amount, category, symbol) VALUES (?, ?, ?, ?)', (text, shares, "股票", sym))
+    else:
+        cat = "支出" if any(w in text for w in ["付", "花", "買", "支出"]) else "儲蓄"
+        if cat == "支出": amt = -abs(amt)
+        conn.execute('INSERT INTO assets (name, amount, category, symbol) VALUES (?, ?, ?, ?)', (text, amt, cat, ""))
+        
+    conn.commit()
+    conn.close()
+    return redirect(url_for('index'))
+
+@app.route('/delete/<int:id>')
+def delete(id):
+    conn = sqlite3.connect(db_path)
+    conn.execute('DELETE FROM assets WHERE id = ?', (id,))
+    conn.commit()
+    conn.close()
+    return redirect(url_for('index'))
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 5000)))    # 統一儲存表
     conn.execute('''CREATE TABLE IF NOT EXISTS assets 
                    (id INTEGER PRIMARY KEY AUTOINCREMENT, 
                     name TEXT, amount REAL, category TEXT, symbol TEXT)''')
