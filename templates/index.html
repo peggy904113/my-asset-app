@@ -1,40 +1,109 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>AI 資產管家 Pro (轉帳編輯版)</title>
+    <title>AI 資產管家 Pro</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        body { background-color: #f8f9fc; }
+        body { background-color: #f0f2f5; font-family: sans-serif; }
         .card { border: none; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.05); margin-bottom: 20px; }
-        .transfer-box { background-color: #eef2ff; border: 1px dashed #4e73df; }
+        .transfer-section { background-color: #eef2ff; border: 1px dashed #4e73df; padding: 15px; border-radius: 10px; }
+        .negative-amt { color: #dc3545; font-weight: bold; }
     </style>
 </head>
 <body>
     <div class="container py-4">
-        <h2 class="text-center mb-4 text-primary fw-bold">我的全能資產管家</h2>
+        <h2 class="text-center mb-4 fw-bold text-primary">智能資產管理系統</h2>
 
-        <div class="row mb-4 text-center">
+        <div class="row mb-4">
             <div class="col-md-4">
                 <div class="card p-3">
-                    <h6>資產佔比</h6>
-                    <canvas id="pieChart"></canvas>
+                    <h6 class="text-muted">資產分佈</h6>
+                    <canvas id="pieChart" style="max-height: 180px;"></canvas>
                 </div>
             </div>
             <div class="col-md-8">
-                <div class="row">
-                    <div class="col-6"><div class="card p-4"><h6>現金</h6><h2 class="text-primary">${{ "{:,.0f}".format(total_cash) }}</h2></div></div>
-                    <div class="col-6"><div class="card p-4"><h6>股票</h6><h2 class="text-success">${{ "{:,.0f}".format(total_stock_value) }}</h2></div></div>
+                <div class="row g-3">
+                    <div class="col-6 text-center">
+                        <div class="card p-4"><h6>現金總計</h6><h2 class="text-primary">${{ display_cash }}</h2></div>
+                    </div>
+                    <div class="col-6 text-center">
+                        <div class="card p-4"><h6>股票市值</h6><h2 class="text-success">${{ display_stock }}</h2></div>
+                    </div>
                 </div>
-                <div class="card p-3 transfer-box">
-                    <h6 class="fw-bold">↔️ 快速轉帳 (銀行間移動)</h6>
+                <div class="transfer-section">
+                    <h6 class="fw-bold">↔️ 快速轉帳</h6>
                     <form action="/transfer" method="POST" class="row g-2">
-                        <div class="col-4"><input type="text" name="from_bank" class="form-control form-control-sm" placeholder="轉出銀行"></div>
-                        <div class="col-4"><input type="text" name="to_bank" class="form-control form-control-sm" placeholder="轉入銀行"></div>
-                        <div class="col-3"><input type="number" name="amount" class="form-control form-control-sm" placeholder="金額"></div>
-                        <div class="col-1"><button class="btn btn-sm btn-dark">GO</button></div>
+                        <div class="col-4"><input type="text" name="from_bank" class="form-control" placeholder="從哪轉出" required></div>
+                        <div class="col-4"><input type="text" name="to_bank" class="form-control" placeholder="轉到哪裡" required></div>
+                        <div class="col-3"><input type="number" name="amount" class="form-control" placeholder="金額" required></div>
+                        <div class="col-1"><button class="btn btn-dark">➔</button></div>
                     </form>
+                </div>
+            </div>
+        </div>
+
+        <div class="row">
+            <div class="col-md-4">
+                <div class="card p-3">
+                    <h6 id="form-title" class="fw-bold">＋ 新增/編輯紀錄</h6>
+                    <form action="/save_cash" method="POST">
+                        <input type="hidden" name="id" id="edit-id">
+                        <input type="text" name="bank_name" id="edit-name" class="form-control mb-2" placeholder="名稱" required>
+                        <input type="number" step="any" name="amount" id="edit-amount" class="form-control mb-2" placeholder="金額" required>
+                        <button class="btn btn-primary w-100">儲存</button>
+                        <button type="button" onclick="location.reload()" class="btn btn-link btn-sm w-100 text-muted mt-1">取消編輯</button>
+                    </form>
+                </div>
+                <div class="card p-3">
+                    <h6 class="fw-bold text-success">＋ 記錄證券持股</h6>
+                    <form action="/add_trade" method="POST">
+                        <input type="text" name="symbol" class="form-control mb-2" placeholder="代號 (2330.TW)" required>
+                        <input type="number" step="any" name="shares" class="form-control mb-2" placeholder="股數" required>
+                        <button class="btn btn-success w-100">記錄</button>
+                    </form>
+                </div>
+            </div>
+            <div class="col-md-8">
+                <div class="card p-3">
+                    <h6>現金收支明細</h6>
+                    <table class="table table-hover">
+                        <thead><tr><th>名稱</th><th>金額</th><th>操作</th></tr></thead>
+                        <tbody>
+                            {% for c in cash_items %}
+                            <tr>
+                                <td>{{ c[1] }}</td>
+                                <td class="{{ 'negative-amt' if c[2] < 0 else '' }}">${{ "{:,.2f}".format(c[2]) }}</td>
+                                <td>
+                                    <button class="btn btn-sm btn-outline-primary" onclick="editItem('{{ c[0] }}', '{{ c[1] }}', '{{ c[2] }}')">編輯</button>
+                                    <a href="/delete_cash/{{ c[0] }}" class="btn btn-sm text-danger">刪除</a>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        new Chart(document.getElementById('pieChart'), {
+            type: 'doughnut',
+            data: { labels: ['現金', '股票'], datasets: [{ data: [{{ total_cash }}, {{ total_stock_value }}], backgroundColor: ['#4e73df', '#1cc88a'] }] },
+            options: { maintainAspectRatio: false }
+        });
+
+        function editItem(id, name, amount) {
+            document.getElementById('edit-id').value = id;
+            document.getElementById('edit-name').value = name;
+            document.getElementById('edit-amount').value = amount;
+            document.getElementById('form-title').innerText = "📝 正在編輯紀錄";
+        }
+    </script>
+</body>
+</html>                    </form>
                 </div>
             </div>
         </div>
@@ -224,5 +293,6 @@
 </script>
 </body>
 </html>
+
 
 
