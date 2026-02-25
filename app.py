@@ -1,20 +1,18 @@
 import os
 import re
-import psycopg2  # 引入 PostgreSQL 驅動
+import psycopg2
 from flask import Flask, render_template_string, request, redirect, url_for
 from datetime import datetime
 
 app = Flask(__name__)
 
-# --- 這裡填入你在 Supabase 取得的網址 ---
-# 建議把網址存在 Render 的 Environment Variables 裡比較安全
-DATABASE_URL = os.environ.get('DATABASE_URL', '你的Supabase_URI網址')
+# 從 Render 環境變數讀取連線資訊
+DATABASE_URL = os.environ.get('DATABASE_URL')
 
 def get_db_connection():
-    conn = psycopg2.connect(DATABASE_URL)
-    return conn
+    return psycopg2.connect(DATABASE_URL)
 
-# 初始化雲端資料庫表格
+# 初始化資料庫（確保有 note 欄位來存細節）
 def init_db():
     conn = get_db_connection()
     cur = conn.cursor()
@@ -25,30 +23,72 @@ def init_db():
     cur.close()
     conn.close()
 
-init_db()
+# --- AI 智慧解析：強化卡費模式 ---
+def super_parser(text):
+    text = text.replace(',', '').strip()
+    now = datetime.now()
+    current_month = f"{now.month}月"
+    
+    # 提取金額
+    amt = 0
+    nums = re.findall(r'\d+\.?\d*', text)
+    if nums:
+        amt = float(nums[0])
+        if '萬' in text: amt *= 10000
 
-# ... (其餘 super_parser 解析邏輯維持不變) ...
+    # 1. 偵測「卡費」指令：[銀行名] [金額] 卡費 / 扣卡費 / 繳卡費
+    if any(w in text for w in ['卡費', '信用卡', '刷卡']):
+        # 提取銀行名稱
+        bank_name = re.sub(r'\d+\.?\d*|萬|卡費|信用卡|刷卡|扣|繳|支付|支出', '', text).strip()
+        if not bank_name: bank_name = "通用卡"
+        
+        # 格式化名稱：銀行名 + 月份 + 卡費
+        formatted_name = f"{bank_name} {current_month} 卡費"
+        return "DECREASE", amt, formatted_name, "支出"
+
+    # 2. 轉帳模式
+    transfer_match = re.search(r'(.+?)(?:\d+\.?\d*[萬]?)\s*(?:轉到|轉入|繳|扣)\s*(.+)', text)
+    if transfer_match:
+        from_acc = re.sub(r'\d+\.?\d*|萬', '', transfer_match.group(1)).strip()
+        to_acc = transfer_match.group(2).strip()
+        return "TRANSFER", amt, from_acc, to_acc
+
+    # 3. 一般模式 (買進/存入)
+    cost_match = re.search(r'成本\s*(\d+\.?\d*)', text)
+    cost = float(cost_match.group(1)) if cost_match else 0
+    clean_name = re.sub(r'\d+\.?\d*|萬|張|成本|買進|買|存款', '', text).strip()
+    cat = "證券" if any(w in text for w in ['股', '張', '成本', '買進']) else "存款"
+    
+    return "NORMAL", amt, clean_name, {"cat": cat, "cost": cost}
 
 @app.route('/process', methods=['POST'])
 def process():
     text = request.form.get('user_input', '').strip()
-    mode, val1, name1, extra = super_parser(text)
+    mode, val, name, extra = super_parser(text)
+    
     conn = get_db_connection()
     cur = conn.cursor()
-    now = datetime.now().strftime("%m-%d %H:%M")
+    now_str = datetime.now().strftime("%m-%d %H:%M")
 
-    # 這裡的 SQL 語法稍微改為 PostgreSQL 格式 (%s)
-    if mode == "SELL":
-        cur.execute('SELECT cost FROM assets WHERE display_name = %s AND category = %s ORDER BY id DESC LIMIT 1', (name1, "證券"))
-        row = cur.fetchone()
-        buy_cost = row[0] if row else 0
-        profit = (extra - buy_cost) * val1 if buy_cost > 0 else 0
-        cur.execute('INSERT INTO assets (display_name, amount, category, date, note) VALUES (%s, %s, %s, %s, %s)', 
-                     (name1, -val1, "證券", now, f"賣出結算：獲利 ${profit:,.0f}"))
-        cur.execute('INSERT INTO assets (display_name, amount, category, date) VALUES (%s, %s, %s, %s)', ("證券結算現金", extra * val1, "存款", now))
-    # ... 其餘邏輯以此類推 ...
+    if mode == "DECREASE":
+        # 銀行卡費模式：直接從該名稱扣除金額
+        cur.execute('INSERT INTO assets (display_name, amount, category, date) VALUES (%s, %s, %s, %s)', 
+                    (name, -val, "支出", now_str))
+    elif mode == "TRANSFER":
+        cur.execute('INSERT INTO assets (display_name, amount, category, date) VALUES (%s, %s, %s, %s)', (name, -val, "存款", now_str))
+        cur.execute('INSERT INTO assets (display_name, amount, category, date) VALUES (%s, %s, %s, %s)', (extra, val, "存款", now_str))
+    else: # NORMAL
+        if val != 0:
+            cur.execute('INSERT INTO assets (display_name, amount, category, cost, date) VALUES (%s, %s, %s, %s, %s)', 
+                        (name, val, extra['cat'], extra['cost'], now_str))
     
     conn.commit()
     cur.close()
     conn.close()
     return redirect(url_for('index'))
+
+# --- (其餘 index 渲染與 HTML 保持不變) ---
+
+if __name__ == '__main__':
+    init_db() # 啟動時初始化雲端表格
+    app.run(host='0.0.0.0', port=5000)
