@@ -4,19 +4,30 @@ import re
 from flask import Flask, render_template_string, request, redirect, url_for
 
 app = Flask(__name__)
-# 換到 v35 確保支援證券與 AI 欄位
-db_path = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'assets_v35.db')
+# 升級到 v36 支援成本欄位
+db_path = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'assets_v36.db')
 
 def smart_extract_amt(text):
     text = text.replace(',', '').strip()
+    # 處理「張」：1張 = 1000股
+    zhang_match = re.search(r'(\d+\.?\d*)\s*張', text)
+    if zhang_match:
+        return float(zhang_match.group(1)) * 1000
+    # 處理「萬」
     wan_match = re.search(r'(\d+\.?\d*)\s*萬', text)
-    if wan_match: return float(wan_match.group(1)) * 10000
-    nums = re.findall(r'-?\d+\.?\d*', text)
+    if wan_match:
+        return float(wan_match.group(1)) * 10000
+    # 處理純數字
+    nums = re.findall(r'\d+\.?\d*', text)
     return float(nums[0]) if nums else 0
+
+def extract_cost(text):
+    # 尋找「成本」後面的數字
+    match = re.search(r'成本\s*(\d+\.?\d*)', text)
+    return float(match.group(1)) if match else 0
 
 def init_db():
     conn = sqlite3.connect(db_path)
-    # 增加 type (類別) 與 cost (成本) 欄位
     conn.execute('''CREATE TABLE IF NOT EXISTS assets 
                    (id INTEGER PRIMARY KEY AUTOINCREMENT, 
                     name TEXT, amount REAL, currency TEXT, type TEXT, cost REAL)''')
@@ -37,48 +48,51 @@ HTML_TEMPLATE = """
     <style>
         body { background-color: #0d1117; color: #c9d1d9; }
         .main-card { background: #161b22; border: 1px solid #30363d; border-radius: 12px; padding: 20px; margin-bottom: 15px; }
-        .ai-input { background: #0d1117; border: 1px solid #388bfd; border-radius: 30px; color: white; padding: 12px 20px; width: 100%; outline: none; }
-        .ai-tip { font-size: 0.75rem; color: #f1e05a; background: rgba(241, 224, 90, 0.1); padding: 4px 8px; border-radius: 4px; display: inline-block; }
+        .ai-input { background: #0d1117; border: 2px solid #388bfd; border-radius: 30px; color: white; padding: 12px 20px; width: 100%; outline: none; }
+        .ai-tip { font-size: 0.75rem; color: #f1e05a; background: rgba(241, 224, 90, 0.1); padding: 4px 8px; border-radius: 4px; display: inline-block; margin-top: 5px; }
+        .stock-tag { font-size: 0.7rem; background: #238636; color: white; padding: 2px 6px; border-radius: 4px; }
     </style>
 </head>
 <body>
     <div class="container py-4">
-        <h5 class="text-center fw-bold mb-4">🤖 AI 財富診斷儀表板</h5>
+        <h5 class="text-center fw-bold mb-4">🤖 AI 證券駐守助理</h5>
         
         <form action="/process" method="POST" class="mb-4">
-            <input type="text" name="user_input" class="ai-input" placeholder="例如: 買入 2330 1000股、美金 1000..." required>
+            <input type="text" name="user_input" class="ai-input" placeholder="例如: 買 2330 1張 成本 600">
+            <small class="text-muted ps-2">支援格式：10萬、1張、成本 100</small>
         </form>
 
         <div class="row">
-            <div class="col-md-7">
-                <div class="main-card text-center">
-                    <small class="text-muted">預估總資產 (TWD)</small>
-                    <h2 class="fw-bold text-white">${{ "{:,.0f}".format(total_val) }}</h2>
-                </div>
-            </div>
-            <div class="col-md-5">
-                <div class="main-card" style="height: 140px; padding: 10px;">
-                    <canvas id="assetChart"></canvas>
-                </div>
-            </div>
+            <div class="col-6"><div class="main-card text-center">
+                <small class="text-muted">資產總計</small>
+                <h3 class="fw-bold text-white">${{ "{:,.0f}".format(total_val) }}</h3>
+            </div></div>
+            <div class="col-6"><div class="main-card" style="height: 105px; padding: 5px;"><canvas id="assetChart"></canvas></div></div>
         </div>
 
         <div class="main-card">
-            <h6 class="fw-bold mb-3">資產明細與 AI 建議</h6>
+            <h6 class="fw-bold mb-3">我的持倉與 AI 診斷</h6>
             {% for item in history %}
-            <div class="d-flex justify-content-between align-items-center border-bottom border-secondary py-3">
-                <div>
-                    <div class="fw-bold text-white">{{ item[1] }}</div>
-                    {% if item[4] == '證券' %}
-                        <div class="ai-tip">🤖 AI 建議：定期觀察大盤，若獲利超 20% 可考慮分批停利</div>
-                    {% else %}
-                        <span class="badge bg-dark text-info" style="font-size: 0.6rem;">{{ item[3] }}</span>
-                    {% endif %}
+            <div class="border-bottom border-secondary py-3">
+                <div class="d-flex justify-content-between">
+                    <div>
+                        <span class="fw-bold text-white">{{ item[1] }}</span>
+                        {% if item[4] == '證券' %}<span class="stock-tag">證券</span>{% endif %}
+                    </div>
+                    <div class="text-end">
+                        <div class="fw-bold">${{ "{:,.0f}".format(item[2]) if item[4] != '證券' else "{:,.0f} 股".format(item[2]) }}</div>
+                        <a href="/delete/{{ item[0] }}" class="text-danger small" style="text-decoration:none;">移除</a>
+                    </div>
                 </div>
-                <div class="text-end">
-                    <div class="fw-bold">${{ "{:,.0f}".format(item[2] * rates.get(item[3], 1.0)) }}</div>
-                    <a href="/delete/{{ item[0] }}" class="text-danger small" style="text-decoration:none;">移除</a>
-                </div>
+                {% if item[4] == '證券' %}
+                    <div class="ai-tip">
+                        {% if item[5] > 0 %}
+                            🤖 AI 駐守：成本 {{ item[5] }}。建議設 10% 停損點於 {{ item[5] * 0.9 }}，若大盤轉弱請注意風險。
+                        {% else %}
+                            🤖 AI 建議：未記錄成本。建議輸入「成本 XXX」以利 AI 追蹤風險。
+                        {% endif %}
+                    </div>
+                {% endif %}
             </div>
             {% endfor %}
         </div>
@@ -87,7 +101,7 @@ HTML_TEMPLATE = """
     <script>
         const ctx = document.getElementById('assetChart').getContext('2d');
         new Chart(ctx, {
-            type: 'doughnut',
+            type: 'pie',
             data: {
                 labels: ['一般', '證券'],
                 datasets: [{
@@ -107,39 +121,32 @@ HTML_TEMPLATE = """
 def index():
     conn = sqlite3.connect(db_path)
     c = conn.cursor()
-    c.execute('SELECT id, name, amount, currency, type FROM assets ORDER BY id DESC')
+    c.execute('SELECT id, name, amount, currency, type, cost FROM assets ORDER BY id DESC')
     history = c.fetchall()
-    rates = {"美金": 32.5, "USD": 32.5, "日幣": 0.21, "JPY": 0.21, "TWD": 1.0}
     
     total_val = 0
     type_sums = {'一般': 0, '證券': 0}
-    
     for item in history:
-        val = item[2] * rates.get(item[3], 1.0)
+        # 簡單邏輯：如果是證券，總額先以股數計算（未來可再加入即時股價）
+        val = item[2]
         total_val += val
-        type_sums[item[4]] = type_sums.get(item[4], 0) + val
+        type_sums[item[4]] += val
         
     conn.close()
-    return render_template_string(HTML_TEMPLATE, history=history, total_val=total_val, rates=rates, type_sums=type_sums)
+    return render_template_string(HTML_TEMPLATE, history=history, total_val=total_val, type_sums=type_sums)
 
 @app.route('/process', methods=['POST'])
 def process():
     text = request.form.get('user_input', '').strip()
     amt = smart_extract_amt(text)
+    cost = extract_cost(text)
     
-    # AI 判斷類別
-    asset_type = "一般"
-    if any(w in text for w in ["股", "張", "買入", "證券", "2330"]):
-        asset_type = "證券"
+    asset_type = "證券" if any(w in text for w in ["股", "張", "買", "成本"]) else "一般"
     
-    curr = "TWD"
-    for c in ["美金", "USD", "日幣", "JPY"]:
-        if c in text.upper(): curr = c; break
-
     if amt != 0:
         conn = sqlite3.connect(db_path)
-        conn.execute('INSERT INTO assets (name, amount, currency, type) VALUES (?, ?, ?, ?)', 
-                     (text, amt, curr, asset_type))
+        conn.execute('INSERT INTO assets (name, amount, currency, type, cost) VALUES (?, ?, ?, ?, ?)', 
+                     (text, amt, "TWD", asset_type, cost))
         conn.commit()
         conn.close()
     return redirect(url_for('index'))
