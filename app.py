@@ -5,7 +5,6 @@ import sqlite3
 
 base_dir = os.path.abspath(os.path.dirname(__file__))
 template_dir = os.path.join(base_dir, 'templates')
-# 升級到 v5，讓資料庫重新乾淨建立
 db_path = os.path.join(base_dir, 'assets_v5.db')
 
 app = Flask(__name__, template_folder=template_dir)
@@ -26,15 +25,16 @@ def index():
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
         
-        # 抓取現金
+        # 1. 抓取現金明細
         cursor.execute('SELECT id, name, amount, currency FROM cash ORDER BY id DESC')
         cash_items = cursor.fetchall()
         
+        # 2. 計算現金總計
         cursor.execute('SELECT SUM(amount) FROM cash')
         res_cash = cursor.fetchone()
         total_cash = float(res_cash[0]) if res_cash and res_cash[0] is not None else 0.0
         
-        # 抓取股票
+        # 3. 抓取股票並計算現值
         cursor.execute('SELECT symbol, SUM(shares) FROM trades GROUP BY symbol')
         stocks_raw = cursor.fetchall()
         stock_list = []
@@ -44,6 +44,7 @@ def index():
             if shares and shares > 0:
                 try:
                     ticker = yf.Ticker(symbol)
+                    # 使用 fast_info 獲取價格，若失敗則設為 0
                     price = float(ticker.fast_info.get('last_price', 0))
                     val = shares * price
                     total_stock_value += val
@@ -53,7 +54,7 @@ def index():
         
         conn.close()
         
-        # 格式化顯示用的字串
+        # 格式化顯示字串
         display_cash = "{:,.2f}".format(total_cash)
         display_stock = "{:,.2f}".format(total_stock_value)
         
@@ -65,7 +66,7 @@ def index():
                                cash_items=cash_items, 
                                stocks=stock_list)
     except Exception as e:
-        return f"系統啟動中，請稍後重整網頁... (錯誤: {str(e)})"
+        return f"系統啟動中，請稍後重整網頁... (錯誤詳情: {str(e)})"
 
 @app.route('/save_cash', methods=['POST'])
 def save_cash():
@@ -74,9 +75,9 @@ def save_cash():
     amt = request.form.get('amount')
     if name and amt:
         conn = sqlite3.connect(db_path)
-        if item_id: # 編輯舊資料
+        if item_id: # 編輯模式
             conn.execute('UPDATE cash SET name=?, amount=? WHERE id=?', (name, float(amt), item_id))
-        else: # 新增資料
+        else: # 新增模式
             conn.execute('INSERT INTO cash (name, amount) VALUES (?, ?)', (name, float(amt)))
         conn.commit()
         conn.close()
@@ -90,7 +91,7 @@ def transfer():
     if from_b and to_b and amt:
         val = float(amt)
         conn = sqlite3.connect(db_path)
-        # 同時產生兩筆紀錄：一正一負
+        # 一次寫入兩筆紀錄實現轉帳
         conn.execute('INSERT INTO cash (name, amount) VALUES (?, ?)', (f"轉出: {from_b} ➔ {to_b}", -val))
         conn.execute('INSERT INTO cash (name, amount) VALUES (?, ?)', (f"轉入: {from_b} ➔ {to_b}", val))
         conn.commit()
