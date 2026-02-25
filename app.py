@@ -102,7 +102,7 @@ HTML_TEMPLATE = """
             data: {
                 labels: ['現金', '股票', '其他'],
                 datasets: [{
-                    data: [{{ total_cash }}, {{ total_stock }}, 100000],
+                    data: [{{ total_cash }}, {{ total_stock }}, 0],
                     backgroundColor: ['#388bfd', '#238636', '#f1e05a'],
                     borderWidth: 0
                 }]
@@ -144,7 +144,7 @@ def index():
     # 目標
     c.execute('SELECT target_name, target_amount FROM goals WHERE id=1')
     g_name, g_amt = c.fetchone()
-    total_val = total_cash + total_stock + 100000
+    total_val = total_cash + total_stock 
     progress = round((total_val / g_amt) * 100, 1)
     
     ai_feedback = request.args.get('feedback', '準備好挑戰百萬了嗎？一次輸入多個指令也沒問題！')
