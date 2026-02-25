@@ -21,45 +21,34 @@ init_db()
 
 @app.route('/')
 def index():
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
-    
-    # 抓取現金明細
-    cursor.execute('SELECT id, name, amount, currency FROM cash ORDER BY id DESC')
-    cash_items = cursor.fetchall()
-    
-    # 計算現金總計
-    cursor.execute('SELECT SUM(amount) FROM cash')
-    res_cash = cursor.fetchone()
-    total_cash = float(res_cash[0]) if res_cash and res_cash[0] is not None else 0.0
-    
-    # 抓取股票並計算市值
-    cursor.execute('SELECT symbol, SUM(shares) FROM trades GROUP BY symbol')
-    stocks_raw = cursor.fetchall()
-    stock_list = []
-    total_stock_value = 0.0
-    
-    for symbol, shares in stocks_raw:
-        if shares > 0:
-            try:
-                ticker = yf.Ticker(symbol)
-                price = float(ticker.fast_info.get('last_price', 0))
-                val = shares * price
-                total_stock_value += val
-                stock_list.append({'symbol': symbol, 'shares': shares, 'price': round(price, 2), 'value': round(val, 2)})
-            except:
-                stock_list.append({'symbol': symbol, 'shares': shares, 'price': 0, 'value': 0})
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        cursor.execute('SELECT id, name, amount, currency FROM cash ORDER BY id DESC')
+        cash_items = cursor.fetchall()
+        cursor.execute('SELECT SUM(amount) FROM cash')
+        res_cash = cursor.fetchone()
+        total_cash = float(res_cash[0]) if res_cash and res_cash[0] is not None else 0.0
+        
+        cursor.execute('SELECT symbol, SUM(shares) FROM trades GROUP BY symbol')
+        stocks_raw = cursor.fetchall()
+        stock_list = []
+        total_stock_value = 0.0
+        for symbol, shares in stocks_raw:
+            if shares > 0:
+                try:
+                    ticker = yf.Ticker(symbol)
+                    price = float(ticker.fast_info.get('last_price', 0))
+                    val = shares * price
+                    total_stock_value += val
+                    stock_list.append({'symbol': symbol, 'shares': shares, 'price': round(price, 2), 'value': round(val, 2)})
+                except:
+                    stock_list.append({'symbol': symbol, 'shares': shares, 'price': 0, 'value': 0})
+        conn.close()
+        return render_template('index.html', total_cash=total_cash, total_stock_value=total_stock_value, cash_items=cash_items, stocks=stock_list)
+    except Exception as e:
+        return f"系統初始化中，請重新整理網頁... (Err: {str(e)})"
 
-    conn.close()
-    
-    # 這裡將數據傳給 HTML，讓 JavaScript 畫圖
-    return render_template('index.html', 
-                           total_cash=total_cash, 
-                           total_stock_value=round(total_stock_value, 2), 
-                           cash_items=cash_items, 
-                           stocks=stock_list)
-
-# 以下為功能 Route
 @app.route('/add_cash', methods=['POST'])
 def add_cash():
     name = request.form.get('bank_name')
@@ -78,7 +67,7 @@ def add_trade():
     shs = request.form.get('shares')
     if sym and shs:
         conn = sqlite3.connect(db_path)
-        conn.execute('INSERT INTO trades (symbol, shares, price, date) VALUES (?, ?, ?, ?)', (sym, float(shs), 0, ""))
+        conn.execute('INSERT INTO trades (symbol, shares, price, date) VALUES (?, ?, 0, "")', (sym, float(shs)))
         conn.commit()
         conn.close()
     return redirect(url_for('index'))
