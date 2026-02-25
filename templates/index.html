@@ -1,57 +1,85 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>AI 資產管家 Pro +</title>
+    <title>AI 資產管家 Pro</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        body { background-color: #f8f9fc; font-family: 'PingFang TC', sans-serif; }
-        .navbar { background: linear-gradient(135deg, #4e73df 0%, #224abe 100%); color: white; padding: 20px; }
-        .ai-box { background: #fff; border-left: 5px solid #f6c23e; border-radius: 10px; padding: 15px; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
-        .card { border: none; border-radius: 15px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); margin-bottom: 20px; }
-        .btn-primary { background-color: #4e73df; border: none; }
-        .btn-success { background-color: #1cc88a; border: none; }
-        .chart-container { position: relative; height: 250px; }
+        body { background-color: #f8f9fc; }
+        .navbar { background: #4e73df; color: white; padding: 15px; }
+        .card { border: none; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin-bottom: 20px; }
+        .ai-hint { background: #fff3cd; border-left: 5px solid #ffc107; padding: 10px; border-radius: 5px; margin-bottom: 20px; }
     </style>
 </head>
 <body>
+    <nav class="navbar mb-4 text-center"><h3>AI 資產管家 Pro</h3></nav>
+    <div class="container">
+        <div class="ai-hint">
+            <strong>🤖 AI 理財建議：</strong>
+            <span id="ai-msg">正在分析...</span>
+        </div>
 
-<nav class="navbar mb-4 text-center">
-    <div class="container"><h3>智能資產總覽系統</h3></div>
-</nav>
+        <div class="row text-center mb-4">
+            <div class="col-6"><div class="card p-3"><h6>現金總計</h6><h3 class="text-primary">${{ total_cash }}</h3></div></div>
+            <div class="col-6"><div class="card p-3"><h6>股票市值</h6><h3 class="text-success">${{ total_stock_value }}</h3></div></div>
+        </div>
 
-<div class="container">
-    <div class="ai-box">
-        <h6 class="fw-bold">🤖 AI 理財助理建議：</h6>
-        <p id="ai-text" class="mb-0 text-muted small">正在計算資產權重...</p>
-    </div>
-
-    <div class="row mb-4">
-        <div class="col-lg-8">
-            <div class="card p-3">
-                <h6 class="fw-bold text-muted">資產成長趨勢 (模擬)</h6>
-                <div class="chart-container"><canvas id="lineChart"></canvas></div>
+        <div class="row">
+            <div class="col-md-4">
+                <div class="card p-3">
+                    <h6>＋ 新增收支</h6>
+                    <form action="/add_cash" method="POST">
+                        <input type="text" name="bank_name" class="form-control mb-2" placeholder="項目" required>
+                        <input type="number" step="any" name="amount" class="form-control mb-2" placeholder="金額" required>
+                        <button class="btn btn-primary w-100">存檔</button>
+                    </form>
+                </div>
+                <div class="card p-3">
+                    <h6>＋ 記錄股票</h6>
+                    <form action="/add_trade" method="POST">
+                        <input type="text" name="symbol" class="form-control mb-2" placeholder="代號" required>
+                        <input type="number" step="any" name="shares" class="form-control mb-2" placeholder="股數" required>
+                        <button class="btn btn-success w-100">紀錄</button>
+                    </form>
+                </div>
+            </div>
+            <div class="col-md-8">
+                <div class="card p-3">
+                    <canvas id="myPieChart" style="max-height: 200px;"></canvas>
+                </div>
+                <div class="card p-3 text-center">
+                    <h6>資產明細表</h6>
+                    <table class="table table-sm">
+                        <thead><tr><th>名稱</th><th>類型</th><th>金額</th></tr></thead>
+                        <tbody>
+                            {% for c in cash_items %}<tr><td>{{ c[1] }}</td><td>現金</td><td>${{ c[2] }}</td></tr>{% endfor %}
+                            {% for s in stocks %}<tr><td>{{ s.symbol }}</td><td>股票</td><td>${{ s.value }}</td></tr>{% endfor %}
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
-        <div class="col-lg-4">
-            <div class="card p-3">
-                <h6 class="fw-bold text-muted">資產分佈比率</h6>
-                <div class="chart-container"><canvas id="pieChart"></canvas></div>
-            </div>
-        </div>
     </div>
 
-    <div class="row">
-        <div class="col-lg-4">
-            <div class="card p-3">
-                <h6 class="fw-bold text-primary">＋ 新增現金 / 支出</h6>
-                <form action="/add_cash" method="POST">
-                    <input type="text" name="bank_name" class="form-control mb-2" placeholder="項目 (如:中信/房租)" required>
-                    <select name="currency" class="form-select mb-2">
-                        <option value="TWD">TWD (台幣)</option>
-                        <option value="USD">USD (美金)</option>
-                    </select>
+    <script>
+        const cash = {{ total_cash }};
+        const stock = {{ total_stock_value }};
+        
+        // 畫圖
+        new Chart(document.getElementById('myPieChart'), {
+            type: 'doughnut',
+            data: { labels: ['現金', '股票'], datasets: [{ data: [cash, stock], backgroundColor: ['#4e73df', '#1cc88a'] }] }
+        });
+
+        // AI 邏輯
+        const msg = document.getElementById('ai-msg');
+        if (cash + stock === 0) msg.innerText = "開始輸入資料，我會為您分析！";
+        else if (stock > cash) msg.innerText = "股票比例較高，注意市場波動。";
+        else msg.innerText = "資產配置穩健，繼續保持！";
+    </script>
+</body>
+</html>                    </select>
                     <input type="number" step="any" name="amount" class="form-control mb-2" placeholder="金額 (支出輸入負數)" required>
                     <button class="btn btn-primary w-100">存檔</button>
                 </form>
@@ -128,3 +156,4 @@
 </script>
 </body>
 </html>
+
