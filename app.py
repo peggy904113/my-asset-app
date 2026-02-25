@@ -5,7 +5,7 @@ import sqlite3
 
 base_dir = os.path.abspath(os.path.dirname(__file__))
 template_dir = os.path.join(base_dir, 'templates')
-db_path = os.path.join(base_dir, 'assets.db')
+db_path = os.path.join(base_dir, 'assets_v3.db')
 
 app = Flask(__name__, template_folder=template_dir)
 
@@ -97,3 +97,4 @@ def add_trade():
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port)
+
