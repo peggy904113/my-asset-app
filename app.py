@@ -5,7 +5,7 @@ from flask import Flask, render_template_string, request, redirect, url_for
 import yfinance as yf
 
 app = Flask(__name__)
-db_path = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'assets_v18.db')
+db_path = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'assets_v20.db')
 
 # --- 1. 強化版 AI 數字解析 (解決 10萬變 10元問題) ---
 def cn_to_num(cn):
