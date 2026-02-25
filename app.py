@@ -1,164 +1,193 @@
 import os
-from flask import Flask, render_template_string, request, redirect, url_for
-import yfinance as yf
 import sqlite3
-import re
+import yfinance as yf
+from flask import Flask, render_template_string, request, redirect, url_for
 
 app = Flask(__name__)
-# 使用 v9 資料庫，確保結構乾淨
-db_path = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'assets_v9.db')
+db_path = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'assets_v10.db')
 
+# --- 資料庫初始化 (新增目標表) ---
 def init_db():
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
-    cursor.execute('CREATE TABLE IF NOT EXISTS cash (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, amount REAL)')
-    cursor.execute('CREATE TABLE IF NOT EXISTS trades (id INTEGER PRIMARY KEY AUTOINCREMENT, symbol TEXT, shares REAL)')
+    cursor.execute('CREATE TABLE IF NOT EXISTS cash (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, amount REAL, category TEXT)')
+    cursor.execute('CREATE TABLE IF NOT EXISTS trades (id INTEGER PRIMARY KEY AUTOINCREMENT, symbol TEXT, shares REAL, cost REAL)')
+    cursor.execute('CREATE TABLE IF NOT EXISTS goals (id INTEGER PRIMARY KEY, target_name TEXT, target_amount REAL)')
+    # 初始化一個百萬目標
+    cursor.execute('INSERT OR IGNORE INTO goals (id, target_name, target_amount) VALUES (1, "百萬大關", 1000000)')
     conn.commit()
     conn.close()
 
 init_db()
 
-# --- AI 解析引擎 ---
-def smart_parser(text):
-    # A. 轉帳
-    transfer_match = re.search(r"(.+?)\s*(?:轉|移|轉帳)\s*(?:到|至)?\s*(.+?)\s*(\d+)", text)
-    if transfer_match:
-        from_b, to_b, amt = transfer_match.groups()
-        return "transfer", {"from": from_b, "to": to_b, "amount": float(amt)}
-    # B. 股票
-    stock_match = re.search(r"(?:買|賣)?\s*([A-Z0-9\.]+)\s*(\d+)\s*(?:股|張)?", text.upper())
-    if stock_match:
-        symbol, shares = stock_match.groups()
-        if "張" in text: shares = float(shares) * 1000
-        if symbol.isdigit() and len(symbol) >= 4 and "." not in symbol: symbol += ".TW"
-        return "stock", {"symbol": symbol, "shares": float(shares)}
-    # C. 現金
-    cash_match = re.search(r"(.+?)\s*(-?\d+)", text)
-    if cash_match:
-        name, amt = cash_match.groups()
-        return "cash", {"name": name, "amount": float(amt)}
-    return None, None
-
+# --- 核心 UI 模板 ---
 HTML_TEMPLATE = """
 <!DOCTYPE html>
-<html>
+<html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>Gemini AI 智能財富</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gemini 財富助理</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        body { background-color: #0d1117; color: #c9d1d9; font-family: sans-serif; }
-        .ai-section { background: linear-gradient(135deg, #1e3a8a 0%, #0d1117 100%); padding: 50px 0; border-bottom: 1px solid #30363d; }
-        .ai-input-wrapper { background: #0d1117; border: 2px solid #388bfd; border-radius: 50px; padding: 10px 25px; display: flex; box-shadow: 0 0 20px rgba(56, 139, 253, 0.3); }
-        .ai-input-wrapper input { background: transparent; border: none; color: white; flex-grow: 1; outline: none; font-size: 1.2rem; }
-        .card { background: #161b22; border: 1px solid #30363d; border-radius: 15px; margin-bottom: 20px; }
-        .btn-ai { background: #238636; color: white; border-radius: 30px; border: none; padding: 8px 25px; font-weight: bold; }
+        body { background-color: #0d1117; color: #c9d1d9; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        .ai-card { background: linear-gradient(145deg, #1c2128, #0d1117); border: 1px solid #30363d; border-radius: 15px; box-shadow: 0 8px 32px rgba(0,0,0,0.3); }
+        .progress { height: 25px; border-radius: 12px; background-color: #30363d; }
+        .btn-gemini { background: linear-gradient(90deg, #4f46e5, #06b6d4); color: white; border: none; border-radius: 20px; font-weight: bold; }
+        .chat-box { height: 150px; overflow-y: auto; background: #161b22; border-radius: 10px; padding: 15px; border-left: 4px solid #58a6ff; }
+        .stock-up { color: #39d353; } .stock-down { color: #f85149; }
     </style>
 </head>
 <body>
-    <div class="ai-section text-center">
+    <nav class="navbar navbar-dark bg-dark mb-4">
         <div class="container">
-            <h2 class="fw-bold text-white mb-4">🤖 Gemini AI 智慧助理</h2>
-            <div class="row justify-content-center">
-                <div class="col-lg-8">
-                    <form action="/smart_input" method="POST" class="ai-input-wrapper">
-                        <input type="text" name="raw_text" placeholder="輸入範例：買 2330 1張 / 中信轉台新 3000 / 薪水 50000" required>
-                        <button type="submit" class="btn btn-ai">執行</button>
+            <span class="navbar-brand mb-0 h1">🤖 Gemini AI 財富教練</span>
+        </div>
+    </nav>
+
+    <div class="container">
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="ai-card p-4">
+                    <h5 class="mb-3">💬 助理對話記錄</h5>
+                    <div class="chat-box mb-3" id="chatHistory">
+                        {{ ai_feedback | safe }}
+                    </div>
+                    <form action="/smart_process" method="POST" class="input-group">
+                        <input type="text" name="user_input" class="form-control bg-dark text-white border-secondary" 
+                               placeholder="輸入：買入 2330 1張 / 信用卡支出 118646 / 設定目標 100萬">
+                        <button class="btn btn-gemini px-4" type="submit">發送指令</button>
                     </form>
                 </div>
             </div>
         </div>
-    </div>
-    <div class="container mt-5">
-        <div class="row">
-            <div class="col-md-4">
-                <div class="card p-4 text-center">
-                    <h6 class="text-muted">總資產估值 (TWD)</h6>
-                    <h2 class="text-primary fw-bold">${{ "{:,.0f}".format(total_cash + total_stock) }}</h2>
-                    <hr style="border-color:#333">
-                    <div class="d-flex justify-content-between small"><span>現金</span><span>${{ "{:,.0f}".format(total_cash) }}</span></div>
-                    <div class="d-flex justify-content-between small"><span>股票</span><span class="text-success">${{ "{:,.0f}".format(total_stock) }}</span></div>
+
+        <div class="row mb-4">
+            <div class="col-md-6">
+                <div class="ai-card p-4 h-100">
+                    <h5>🎯 {{ goal_name }} 進度</h5>
+                    <h2 class="fw-bold text-primary mt-3">${{ "{:,.0f}".format(total_val) }} / ${{ "{:,.0f}".format(goal_amt) }}</h2>
+                    <div class="progress mt-4">
+                        <div class="progress-bar progress-bar-striped progress-bar-animated bg-info" 
+                             style="width: {{ progress }}%">{{ progress }}%</div>
+                    </div>
+                    <p class="mt-3 text-muted">💡 離職倒數中，加油！再漲 {{ 100 - progress }}% 就達標了。</p>
                 </div>
             </div>
-            <div class="col-md-8">
-                <div class="card p-4">
-                    <h6 class="fw-bold mb-3">我的資產清單</h6>
-                    <table class="table table-dark table-hover">
-                        <thead><tr><th>名稱</th><th>分類</th><th>金額/現值</th><th>操作</th></tr></thead>
-                        <tbody>
-                            {% for c in cash_items %}
-                            <tr><td>{{ c[1] }}</td><td><span class="badge bg-secondary">現金</span></td><td>${{ "{:,.0f}".format(c[2]) }}</td><td><a href="/delete/{{ c[0] }}" class="text-danger">刪除</a></td></tr>
-                            {% endfor %}
-                            {% for s in stocks %}
-                            <tr><td>{{ s.symbol }}</td><td><span class="badge bg-success">股票</span></td><td class="text-success">${{ "{:,.0f}".format(s.value) }}</td><td>-</td></tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
+            <div class="col-md-6">
+                <div class="ai-card p-4 h-100 text-center">
+                    <h5>📊 資產佔比</h5>
+                    <canvas id="assetChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="ai-card p-4 border-warning">
+                    <h5 class="text-warning">🔔 助理買賣分析</h5>
+                    <div class="mt-2">
+                        {% for advice in trade_advice %}
+                            <div class="p-2 border-bottom border-secondary">{{ advice | safe }}</div>
+                        {% endfor %}
+                    </div>
                 </div>
             </div>
         </div>
     </div>
+
+    <script>
+        const ctx = document.getElementById('assetChart').getContext('2d');
+        new Chart(ctx, {
+            type: 'doughnut',
+            data: {
+                labels: ['現金', '股票', '黃金/其他'],
+                datasets: [{
+                    data: [{{ total_cash }}, {{ total_stock }}, 100000],
+                    backgroundColor: ['#58a6ff', '#39d353', '#f1e05a'],
+                    borderWidth: 0
+                }]
+            },
+            options: { plugins: { legend: { labels: { color: '#c9d1d9' } } } }
+        });
+    </script>
 </body>
 </html>
 """
 
+# --- 路由邏輯 ---
 @app.route('/')
 def index():
-    try:
-        conn = sqlite3.connect(db_path)
-        cursor = conn.cursor()
-        cursor.execute('SELECT id, name, amount FROM cash ORDER BY id DESC')
-        cash_items = cursor.fetchall()
-        cursor.execute('SELECT SUM(amount) FROM cash')
-        res_cash = cursor.fetchone()
-        total_cash = float(res_cash[0]) if res_cash and res_cash[0] is not None else 0.0
-        
-        cursor.execute('SELECT symbol, SUM(shares) FROM trades GROUP BY symbol')
-        stocks_raw = cursor.fetchall()
-        stock_list, total_stock = [], 0.0
-        
-        for symbol, shares in stocks_raw:
-            if shares > 0:
-                try:
-                    # 加入 timeout 與防錯
-                    ticker = yf.Ticker(symbol)
-                    price = ticker.fast_info.get('last_price')
-                    if price is None or price == 0:
-                        price = 0
-                    val = shares * price
-                    total_stock += val
-                    stock_list.append({'symbol': symbol, 'value': val})
-                except:
-                    stock_list.append({'symbol': symbol, 'value': 0})
-        conn.close()
-        return render_template_string(HTML_TEMPLATE, total_cash=total_cash, total_stock=total_stock, cash_items=cash_items, stocks=stock_list)
-    except Exception as e:
-        return f"系統初始化中...請重新整理。({str(e)})"
-
-@app.route('/smart_input', methods=['POST'])
-def smart_input():
-    raw_text = request.form.get('raw_text', '')
-    cat, data = smart_parser(raw_text)
-    if cat:
-        conn = sqlite3.connect(db_path)
-        if cat == "transfer":
-            conn.execute('INSERT INTO cash (name, amount) VALUES (?, ?)', (f"轉出: {data['from']}", -data['amount']))
-            conn.execute('INSERT INTO cash (name, amount) VALUES (?, ?)', (f"轉入: {data['to']}", data['amount']))
-        elif cat == "stock":
-            conn.execute('INSERT INTO trades (symbol, shares) VALUES (?, ?)', (data['symbol'], data['shares']))
-        elif cat == "cash":
-            conn.execute('INSERT INTO cash (name, amount) VALUES (?, ?)', (data['name'], data['amount']))
-        conn.commit()
-        conn.close()
-    return redirect(url_for('index'))
-
-@app.route('/delete/<int:id>')
-def delete(id):
     conn = sqlite3.connect(db_path)
-    conn.execute('DELETE FROM cash WHERE id = ?', (id,))
+    # 抓取現金
+    c = conn.cursor()
+    c.execute('SELECT SUM(amount) FROM cash')
+    total_cash = c.fetchone()[0] or 0.0
+    
+    # 抓取股票並分析建議
+    c.execute('SELECT symbol, SUM(shares) FROM trades GROUP BY symbol')
+    stocks_raw = c.fetchall()
+    total_stock = 0.0
+    trade_advice = []
+    
+    for sym, sh in stocks_raw:
+        if sh > 0:
+            ticker = yf.Ticker(sym)
+            price = ticker.fast_info.get('last_price') or 0
+            val = sh * price
+            total_stock += val
+            # 簡單分析建議 (你可以根據需求修改)
+            if sym == "2449.TW": # 京元電
+                 trade_advice.append(f"📈 <b>京元電子</b> 獲利豐厚！目前總值 ${val:,.0f}，若要湊百萬可考慮分批了結。")
+            if sym == "2330.TW":
+                 trade_advice.append(f"💪 <b>台積電</b> 是你的核心，目前穩定貢獻 ${val:,.0f}，建議續抱。")
+
+    # 抓取目標
+    c.execute('SELECT target_name, target_amount FROM goals WHERE id=1')
+    g_name, g_amt = c.fetchone()
+    
+    total_val = total_cash + total_stock + 100000 # 加上你的郵局十萬
+    progress = round((total_val / g_amt) * 100, 1)
+    
+    ai_feedback = request.args.get('feedback', '歡迎回來！今天想怎麼調整資產？')
+    
+    conn.close()
+    return render_template_string(HTML_TEMPLATE, total_cash=total_cash, total_stock=total_stock, 
+                                  total_val=total_val, goal_name=g_name, goal_amt=g_amt, 
+                                  progress=progress, trade_advice=trade_advice, ai_feedback=ai_feedback)
+
+@app.route('/smart_process', methods=['POST'])
+def smart_process():
+    text = request.form.get('user_input', '').strip()
+    conn = sqlite3.connect(db_path)
+    feedback = "我收到了！"
+    
+    # 這裡未來可以串接真實 Gemini API 做語意分析
+    # 目前先用進階規則模擬 AI 歸類
+    if "目標" in text:
+        new_amt = "".join(filter(str.isdigit, text))
+        if new_amt:
+            conn.execute('UPDATE goals SET target_amount = ? WHERE id = 1', (float(new_amt),))
+            feedback = f"目標已更新為 {new_amt} 元！加油，我們一起達成。"
+    elif "買" in text or "賣" in text:
+        # 簡單解析：買 2330 1000
+        parts = text.split()
+        if len(parts) >= 3:
+            sym = parts[1] + ".TW" if "." not in parts[1] else parts[1]
+            sh = float(parts[2]) * (-1 if "賣" in text else 1)
+            conn.execute('INSERT INTO trades (symbol, shares) VALUES (?, ?)', (sym.upper(), sh))
+            feedback = f"已記錄股票交易：{sym} {abs(sh)} 股。"
+    elif "支出" in text or "卡費" in text or "薪水" in text:
+        amt = "".join(filter(str.isdigit, text))
+        if amt:
+            val = float(amt) * (-1 if "支出" in text or "卡費" in text else 1)
+            conn.execute('INSERT INTO cash (name, amount) VALUES (?, ?)', (text, val))
+            feedback = f"已記錄金額：{val} 元。"
+            
     conn.commit()
     conn.close()
-    return redirect(url_for('index'))
+    return redirect(url_for('index', feedback=feedback))
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 5000)))
+    app.run(debug=True)
