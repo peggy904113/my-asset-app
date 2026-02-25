@@ -21,49 +21,46 @@ init_db()
 
 @app.route('/')
 def index():
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
-    
-    # 現金加總
-    cursor.execute('SELECT SUM(amount) FROM cash')
-    res_cash = cursor.fetchone()
-    total_cash = float(res_cash[0]) if res_cash and res_cash[0] is not None else 0.0
-    
-    # 股票持倉
-    cursor.execute('SELECT symbol, SUM(shares) FROM trades GROUP BY symbol')
-    stocks_raw = cursor.fetchall()
-    
-    # 歷史紀錄
-    cursor.execute('SELECT id, symbol, shares, price, date FROM trades ORDER BY date DESC LIMIT 10')
-    history = cursor.fetchall()
-    
-    stock_list = []
-    total_stock_value = 0.0
-    
-    for symbol, shares in stocks_raw:
-        if shares > 0:
-            try:
-                ticker = yf.Ticker(symbol)
-                price = float(ticker.fast_info.get('last_price', 0))
-                value = shares * price
-                total_stock_value += value
-                stock_list.append({
-                    'symbol': symbol,
-                    'shares': shares,
-                    'price': round(price, 2),
-                    'value': round(value, 2)
-                })
-            except:
-                stock_list.append({'symbol': symbol, 'shares': shares, 'price': 0.0, 'value': 0.0})
-
-    conn.close()
-    
-    # 重要：這裡傳出的變數名稱要跟 HTML 裡面的一模一樣
-    return render_template('index.html', 
-                           total_cash=total_cash, 
-                           total_stock_value=total_stock_value, 
-                           stocks=stock_list, 
-                           history=history)
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        
+        # 抓取現金
+        cursor.execute('SELECT SUM(amount) FROM cash')
+        res_cash = cursor.fetchone()
+        total_cash = float(res_cash[0]) if res_cash and res_cash[0] is not None else 0.0
+        
+        # 抓取股票
+        cursor.execute('SELECT symbol, SUM(shares) FROM trades GROUP BY symbol')
+        stocks_raw = cursor.fetchall()
+        
+        # 抓取紀錄
+        cursor.execute('SELECT id, symbol, shares, price, date FROM trades ORDER BY date DESC LIMIT 10')
+        history = cursor.fetchall()
+        
+        stock_list = []
+        total_stock_value = 0.0
+        
+        for symbol, shares in stocks_raw:
+            if shares > 0:
+                try:
+                    ticker = yf.Ticker(symbol)
+                    price = float(ticker.fast_info.get('last_price', 0))
+                    value = shares * price
+                    total_stock_value += value
+                    stock_list.append({'symbol': symbol, 'shares': shares, 'price': round(price, 2), 'value': round(value, 2)})
+                except:
+                    stock_list.append({'symbol': symbol, 'shares': shares, 'price': 0.0, 'value': 0.0})
+        conn.close()
+        
+        # 注意：這裡我們把數字先轉成字串，避免 HTML 端的格式化出錯
+        return render_template('index.html', 
+                               total_cash=str(round(total_cash, 2)), 
+                               total_stock_value=str(round(total_stock_value, 2)), 
+                               stocks=stock_list, 
+                               history=history)
+    except Exception as e:
+        return f"系統啟動中，請稍後整理網頁... (錯誤詳情: {str(e)})"
 
 @app.route('/add_cash', methods=['POST'])
 def add_cash():
@@ -78,7 +75,7 @@ def add_cash():
 
 @app.route('/add_trade', methods=['POST'])
 def add_trade():
-    sym = request.form.get('symbol').upper()
+    sym = request.form.get('symbol', '').upper()
     shs = request.form.get('shares')
     pri = request.form.get('price')
     dat = request.form.get('date')
